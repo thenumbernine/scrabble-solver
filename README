@@ -1,0 +1,34 @@
+GPU Ideas ...
+
+greatest width word: 12 letters
+each letter is 25 things ...
+delegate 5 bits for a letter [1,26]
+that means ... still just one per 8-bits ...
+that might as well be 1 byte per letter.
+so 12.  12 is 4 RGB's wide.
+
+whats our height going to be?
+80611
+requires 967,332 bytes total if we have 1-byte per letter
+requires 20 RGB textures of size 4x4096
+if we were to interleave results though ...
+like (4*1024)x4096 ... 
+then we could hold 1024*4096 = 4,194,304 words per texture
+we could hold all our words in one texture.
+we could likewise do that for smaller textures ... like
+65,536 < 131,072 = 256 * 512
+so we could hold our words in a (256*4) x 512 texture,
+or 1024 x 512
+
+then render to a result the size of 256 x 512
+we could load the 4-rgb word as a set of uniforms (slowdown?)
+then do the render pass,
+reading words as 4-rgb texel lookups, subtract-comparing them,
+and writing the sum-squared-difference to the output.
+
+then, like einstein, we can have the cpu cycle through the results
+and see if any are zero.  those are the matches.
+
+...
+
+so first we cycle through all
