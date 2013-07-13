@@ -81,7 +81,7 @@ public:
 
 	bool checkAround(const vec2i &v) const {
 		static vec2i ofs[4] = {vec2i(-1,0), vec2i(1,0), vec2i(0,-1), vec2i(0,1)};
-		for (int l = 0; l < numberof(ofs); l++) {
+		for (int l = 0; l < (int)numberof(ofs); l++) {
 			vec2i v2 = v + ofs[l];
 			if (!inside(v2)) continue;
 			if ((*this)(v2) != '.') return true;	//found a touching thing!
@@ -645,7 +645,7 @@ public:
 	BoardMove() : l(1), dir(0), v(0,0) {}
 	BoardMove(const BoardMove &s) : l(s.l), dir(s.dir), v(s.v) {}
 
-	BoardMove &operator=(const BoardMove &s) { l = s.l; dir = s.dir; v = s.v; }
+	BoardMove &operator=(const BoardMove &s) { l = s.l; dir = s.dir; v = s.v; return *this; }
 
 	//increment the iterator
 	void inc() {
