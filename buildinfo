@@ -1,0 +1,4 @@
+distName='ssolve'
+distType='app'
+depends:insert'../Common'
+depends:insert'../Parallel'

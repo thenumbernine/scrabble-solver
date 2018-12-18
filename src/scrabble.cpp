@@ -1,5 +1,5 @@
 /*
-	Copyright (c) 2010 Christopher E. Moore ( christopher.e.moore@gmail.com / http://christopheremoore.net )
+	Copyright (c) 2010-2018 Christopher E. Moore ( christopher.e.moore@gmail.com / http://christopheremoore.net )
 
 	Permission is hereby granted, free of charge, to any person obtaining a copy
 	of this software and associated documentation files (the "Software"), to deal
@@ -27,25 +27,16 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 
 #include <memory.h>
 #include <assert.h>
 
-#ifdef WIN32
-#include <windows.h>	//CreateThread and all that jazz
-#include <time.h>
-#define strcasecmp _stricmp
-#else
-#include <sys/time.h>
-#endif
+#include "Common/Macros.h"
+#include "Parallel/Parallel.h"
 
-#define NUMBER_OF_THREADS 4
-#define BOARDSIZE	15
+#define BOARDSIZE	11
 #define MAXHANDSIZE	7
-
-#define numberof(x)	(sizeof(x)/sizeof((x)[0]))
-
-using namespace std;
 
 class vec2i {
 public: 
@@ -58,7 +49,7 @@ vec2i &operator+=(vec2i &a, const vec2i &b) { a.x += b.x; a.y += b.y; return a; 
 vec2i &operator-=(vec2i &a, const vec2i &b) { a.x -= b.x; a.y -= b.y; return a; }
 vec2i operator+(const vec2i &a, const vec2i &b) { return vec2i(a.x + b.x, a.y + b.y); }
 bool operator==(const vec2i &a, const vec2i &b) { return a.x == b.x && a.y == b.y; }
-ostream &operator<<(ostream &o, const vec2i &v) { return o << v.x << ", " << v.y; }
+std::ostream &operator<<(std::ostream &o, const vec2i &v) { return o << v.x << ", " << v.y; }
 
 class Board {
 public:
@@ -112,41 +103,16 @@ public:
 		return (float)vol / (float)sa;
 	}
 };
-ostream &operator<<(ostream &o, const Board &b) {
+std::ostream &operator<<(std::ostream &o, const Board &b) {
 	for (int j = 0; j < BOARDSIZE; j++) {
 		for (int i = 0; i < BOARDSIZE; i++) {
 			o << b(i,j);
 		}
-		o << endl;
+		o << std::endl;
 	}
 	return o;
 }
 
-
-#ifdef WIN32
-class Timer {
-public:
-	void init() {}
-	double getTime() { return (double)clock() / (double)CLOCKS_PER_SEC; }
-};
-#else
-class Timer {
-	static struct timezone tz;
-	struct timeval firstTime;
-public:
-	void init() { gettimeofday(&firstTime, &tz); }
-
-	double getTime(void) {
-		struct timeval tv;
-		gettimeofday(&tv, &tz);
-		return
-			((double)tv.tv_sec + (double)tv.tv_usec / 1000000.0) -
-			((double)firstTime.tv_sec + (double)firstTime.tv_usec / 1000000.0);
-	}
-};
-struct timezone Timer::tz = {0,0};
-#endif
-Timer timer;
 
 class Bonus {
 protected:
@@ -154,6 +120,7 @@ protected:
 public:
 	//map these as follows: 1=dl 2=tl, 3=dw, 4=tw
 	Bonus() : bonus(
+#if 0	//TODO load this from a txt file as well	
 		"4..1...4...1..4"
 		".3...2...2...3."
 		"..3...1.1...3.."
@@ -168,8 +135,22 @@ public:
 		"1..3...1...3..1"
 		"..3...1.1...3.."
 		".3...2...2...3."
-		"4..1...4...1..4") {}
-
+		"4..1...4...1..4"
+#endif
+#if 1
+		"2.4.....4.2"
+		".3...3...3."
+		"4.2.1.1.2.4"
+		"...2...2..."
+		"..1.....1.."
+		".3...3...3."
+		"..1.....1.."
+		"...2...2..."
+		"4.2.1.1.2.4"
+		".3...3...3."
+		"2.4.....4.2"
+#endif
+	) {}
 public:
 	int letterMul(const vec2i &v) {
 		assert(Board::inside(v));
@@ -190,11 +171,19 @@ public:
 Bonus bonus;
 
 //0-25, add 'a' to find the right score (stay in lcase huh)
+#if 0	// scrabble
 int letterScoreTable[26] = {
 1,3,3,2,1,4,2,4,1,8,
 5,1,3,1,1,3,10,1,1,1,
 1,4,4,8,4,10
 };
+#else	// words with friends
+int letterScoreTable[26] = {
+1,4,4,2,1,4,3,3,1,10,
+5,2,4,2,1,4,10,1,1,1,
+2,5,4,8,3,10
+};
+#endif
 
 int letterScore(char l) {
 	if (l >= 'a' && l <= 'z') return letterScoreTable[l - 'a'];
@@ -237,7 +226,7 @@ public:
 	}
 };
 template<int CAPACITY> 
-ostream &operator << (ostream &o, IterVec<CAPACITY> &iter) {
+std::ostream &operator << (std::ostream &o, IterVec<CAPACITY> &iter) {
 	o << "[";
 	for (int i = 0; i < iter.size; i++) o << iter.vec[i] << " ";
 	return o << "]";
@@ -253,17 +242,17 @@ char *rtrim(char *line) {
 	return line;
 }
 
-// case-independent (ci) string less_than
+// case-independent (ci) std::string less_than
 // returns true if s1 < s2
-struct ci_less : binary_function<string, string, bool> {
+struct ci_less : std::binary_function<std::string, std::string, bool> {
 
 	// case-independent (ci) compare_less binary function
-	struct nocase_compare : public binary_function<unsigned char,unsigned char,bool> {
+	struct nocase_compare : public std::binary_function<unsigned char,unsigned char,bool> {
 		bool operator() (const unsigned char& c1, const unsigned char& c2) const {
 			return tolower (c1) < tolower (c2); }
 	};
 
-	bool operator() (const string & s1, const string & s2) const {
+	bool operator() (const std::string & s1, const std::string & s2) const {
 		return lexicographical_compare 
 			(s1.begin (), s1.end (),   // source range
 			s2.begin (), s2.end (),   // dest range
@@ -275,14 +264,14 @@ struct ci_less : binary_function<string, string, bool> {
 class Dictionary {
 public:
 	bool useDict;
-	set<string, ci_less> dict;		//if only it could map to n-nested maps ... so its all log(n) access
+	std::set<std::string, ci_less> dict;		//if only it could map to n-nested maps ... so its all log(n) access
 
 	Dictionary() : useDict(false) {}
 
-	bool init(const string &filename) {
-		ifstream file(filename.c_str());
+	bool init(const std::string &filename) {
+		std::ifstream file(filename.c_str());
 		if (!file.is_open()) {
-			cerr << "failed to find dictionary file " << filename << endl;
+			std::cerr << "failed to find dictionary file " << filename << std::endl;
 			return false;
 		}
 		while (!file.eof()) {
@@ -324,14 +313,14 @@ public:
 	{}
 
 	void report() {
-		cout << "pos " << pos << " dir " << dir << " len " << len << " iter " << iter << " ident " << ident << " density " << density << endl;
-		cout << "score is " << score << endl;
-		cout << board;
-		cout << endl;
+		std::cout << "pos " << pos << " dir " << dir << " len " << len << " iter " << iter << " ident " << ident << " density " << density << std::endl;
+		std::cout << "score is " << score << std::endl;
+		std::cout << board;
+		std::cout << std::endl;
 	}
 };
 
-typedef binary_function<BoardAndScore*, BoardAndScore*, bool> ci_bs;
+using ci_bs = std::binary_function<BoardAndScore*, BoardAndScore*, bool> ;
 
 struct ci_score : ci_bs {
 	bool operator() (const BoardAndScore *s1, const BoardAndScore *s2) const {
@@ -346,39 +335,14 @@ struct ci_density : ci_bs {
 };
 
 
-typedef vector<BoardAndScore*> bsvec_t;
-
-class ThreadSafe {
-protected:
-#if NUMBER_OF_THREADS == 1
-	void lock() {}
-	void unlock() {}
-#else
-#ifdef WIN32
-	CRITICAL_SECTION cs;	//critical sections are mutexes for single processes
-	void lock() { EnterCriticalSection(&cs); }
-	void unlock () { LeaveCriticalSection(&cs); }
-public:
-	ThreadSafe() { InitializeCriticalSection(&cs); }
-	~ThreadSafe() { DeleteCriticalSection(&cs); }
-#else
-	pthread_mutex_t mutex;
-	void lock() { pthread_mutex_lock(&mutex); }
-	void unlock() { pthread_mutex_unlock(&mutex); }
-public:
-	ThreadSafe() {
-		int result = pthread_mutex_init(&mutex, NULL);
-		assert(!result);
-	}
-	~ThreadSafe() { pthread_mutex_destroy(&mutex); }
-#endif
-#endif
-};
+using bsvec_t = std::vector<BoardAndScore*> ;
 
 //then use a custom comparator class with a set to sort our boards by score
 //then we can list them all, worse-to-best
-class ScoreSet : public ThreadSafe {
+class ScoreSet {
 protected:
+	std::mutex m;
+	
 	//storing these as a set is keen and all, but it will overwrite boards of teh same score
 	//so il'l just sort it at the end
 	bsvec_t bs;
@@ -399,20 +363,19 @@ public:
 		const vec2i &pos, int dir, int len, IterVec<MAXHANDSIZE> &iter, int ident,
 		float density
 	) {
-		lock();
+		std::scoped_lock<std::mutex> l(m);
 		BoardAndScore *bas = new BoardAndScore(b,s, pos,dir,len,iter,ident,density);
 		assert(bas);
 		bs.push_back(bas);
-		unlock();
 	}
 
 	void report(bool showAll) {
-		lock();
+		std::scoped_lock<std::mutex> l(m);
 		if (showAll) {	//showall means sort then display each in order
 			if (sortByDensity) {
-				sort<bsvec_t::iterator, ci_density>(bs.begin(), bs.end(), ci_density());
+				std::sort<bsvec_t::iterator, ci_density>(bs.begin(), bs.end(), ci_density());
 			} else {
-				sort<bsvec_t::iterator, ci_score>(bs.begin(), bs.end(), ci_score());
+				std::sort<bsvec_t::iterator, ci_score>(bs.begin(), bs.end(), ci_score());
 			}
 			for (bsvec_t::iterator i = bs.begin(); i != bs.end(); i++) {
 				(*i)->report();
@@ -436,7 +399,6 @@ public:
 			}
 			if (best) best->report();
 		}
-		unlock();
 	}
 };
 
@@ -446,13 +408,13 @@ vec2i dirmove[2] = {
 	vec2i(0,1)
 };
 
-string hand;	//arbitrary sized, but must be 1<=size<=MAXHANDSIZE
+std::string hand;	//arbitrary sized, but must be 1<=size<=MAXHANDSIZE
 Board board;		//is there a way to make this a read-only board?  so it only gets info on ctor?
 bool isStart = true;	//true by default.  false set on prog startup
-double startTime = 0.0;	//set on startup
+auto startTime = std::chrono::high_resolution_clock::now();	//set on startup
 ScoreSet scoreset;
 
-//pass it a vector of played places
+//pass it a std::vector of played places
 //use the dif between board and testboard to figure out whats what
 //returns -1 on fail
 int getScore(const vec2i *vs, int vsize, const Board &testboard) {
@@ -623,15 +585,15 @@ void testAllMoves(const vec2i &v, int dir, int l, int ident) {
 		
 		//give us an update every second
 		static int lasts = -1;
-		int s = (int)(timer.getTime() - startTime);
+		int s = (int)std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
 		if (s != lasts) {
 			lasts = s;
-			//cerr for info output not for the boards
-			cerr << "thread " << ident;
-			cerr << " dir = " << dir;
-			cerr << " pos = " << v;
-			cerr << " iter = " << iter;
-			cerr << endl;
+			//std::cerr for info output not for the boards
+			std::cerr << "thread " << ident;
+			std::cerr << " dir = " << dir;
+			std::cerr << " pos = " << v;
+			std::cerr << " iter = " << iter;
+			std::cerr << std::endl;
 		}
 	}
 }
@@ -676,22 +638,21 @@ public:
 };
 
 //has a lot in common with ScoreSet.  consider superclassing.
-class SearchState : ThreadSafe {
+class SearchState {
 protected:
+	std::mutex m;
 	BoardMove ss;
 public:
 
 	BoardMove cur() {
-		lock();
+		std::scoped_lock<std::mutex> l(m);
 		BoardMove r(ss);
-		unlock();
 		return r;
 	}
 
 	BoardMove next() {
-		lock();
+		std::scoped_lock<std::mutex> l(m);
 		BoardMove r(ss);
-		unlock();
 		ss.inc();
 		return r;
 	}
@@ -706,25 +667,17 @@ public:
 };
 
 //i think they might just double.  so long as void* and lpvoid* work the same.  meh.
-#ifdef WIN32
-DWORD WINAPI searchThread(LPVOID _ptr)
-#else
-void *searchThread(void *_ptr)
-#endif
-{
-	ThreadInfo *info = (ThreadInfo*)_ptr;
-	assert(info);
+void searchThread(ThreadInfo& info) {
 	for(;;) {
 		BoardMove ss = searchstate.next();
 		if (ss.done()) break;
-		testAllMoves(ss.v, ss.dir, ss.l, info->ident);
+		testAllMoves(ss.v, ss.dir, ss.l, info.ident);
 	}
-	return 0;
 }
 
 int main(int argc, char **argv) {
 	if (argc < 3) {
-		cerr << "usage: scrabble <boardfile> <hand>" << endl;
+		std::cerr << "usage: scrabble <boardfile> <hand>" << std::endl;
 		return 1;
 	}
 	const char *filename = argv[1];
@@ -734,7 +687,7 @@ int main(int argc, char **argv) {
 		const char *handstr = argv[2];
 		size_t len = strlen(handstr);
 		if (len < 1 || len > MAXHANDSIZE) {
-			cerr << "you only provided a hand of " << len << " letters" << endl;
+			std::cerr << "you only provided a hand of " << len << " letters" << std::endl;
 			return 1;
 		}
 		//hands provided will be lowercase'd.  other chars will be assumed to be spaces
@@ -750,14 +703,14 @@ int main(int argc, char **argv) {
 	}
 
 	//start off our board
-	string boardstr;
+	std::string boardstr;
 	{
-		ifstream file(filename);
+		std::ifstream file(filename);
 		if (!file.is_open()) {
-			cerr << "failed to load the file " << filename << endl;
+			std::cerr << "failed to load the file " << filename << std::endl;
 			return 1;
 		}
-		ostringstream s;
+		std::ostringstream s;
 		char line[256];
 		while (file.getline(line, sizeof(line))) s << rtrim(line);
 		boardstr = s.str();
@@ -775,7 +728,7 @@ int main(int argc, char **argv) {
 			else if (board(i,j) >= 'a' && board(i,j) <= 'z') {} //nothing
 			else if (board(i,j) == '.') {} //nothing / preserve
 			else {
-				cerr << "found an unknown char in the board: " << board(i,j) << " / (" << (int)board(i,j) << ")" << endl;
+				std::cerr << "found an unknown char in the board: " << board(i,j) << " / (" << (int)board(i,j) << ")" << std::endl;
 				return 1;
 			}
 			if (board(i,j) != '.') {
@@ -787,7 +740,7 @@ int main(int argc, char **argv) {
 
 	bool showAll = false;
 	bool useDict = true;
-	string dictFilename = "dictionary.txt";
+	std::string dictFilename = "dictionary.txt";
 
 	//extra params
 	for (int i = 3; i < argc; i++) {
@@ -803,52 +756,25 @@ int main(int argc, char **argv) {
 
 	//load the dictionary
 	if (useDict && !dict.init(dictFilename)) return 1;
-	cout << "using dictionary? " << (dict.useDict ? dictFilename.c_str() : "/no/") << endl;
+	std::cout << "using dictionary? " << (dict.useDict ? dictFilename.c_str() : "/no/") << std::endl;
 
 	//start your engines
-	timer.init();
+	startTime = std::chrono::high_resolution_clock::now();
 
-	startTime = timer.getTime();
-
-#if NUMBER_OF_THREADS == 1
-	ThreadInfo threadArgs;
-	threadArgs.ident = 0;
-	searchThread(&threadArgs);
-#else
 	//start off the threads!
-	ThreadInfo threadArgs[NUMBER_OF_THREADS];	//its either this or find how to poll thread done's from linux
 
-#ifdef WIN32
-	HANDLE threads[NUMBER_OF_THREADS];
-#else
-	pthread_t threads[NUMBER_OF_THREADS];
-#endif
-	for (int i = 0; i < NUMBER_OF_THREADS; i++) {
-		threadArgs[i].ident = i;
-#ifdef WIN32
-		unsigned long threadID;	//what is this used for? thread identifier?
-		threads[i] = CreateThread(NULL, 0, searchThread, threadArgs+i, 0, &threadID);
-		assert(threads[i]);
-#else
-		pthread_create(threads+i, NULL, searchThread, threadArgs+i);
-#endif
-	}
-
-	for (int i = 0; i < NUMBER_OF_THREADS; i++) {
-#ifdef WIN32
-		DWORD result = WaitForSingleObject(threads[i], INFINITE);
-		assert(result != WAIT_FAILED);
-#else
-		pthread_join(threads[i], NULL);
-#endif
-	}
-#endif
+	Parallel::Parallel parallel;
+	std::vector<ThreadInfo> threadArgs(std::thread::hardware_concurrency());
+	
+	parallel.foreach(threadArgs.begin(), threadArgs.end(), [](ThreadInfo& info){
+		searchThread(info);
+	});
 
 	//calc time before dumping report
-	double timeTaken = timer.getTime() - startTime;
+	double timeTaken = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
 
 	scoreset.report(showAll);
-	cerr << "took " << timeTaken << " seconds to cycle through all those tiles and permutations ..." << endl;
+	std::cerr << "took " << timeTaken << " seconds to cycle through all those tiles and permutations ..." << std::endl;
 
 	return 0;
 }
