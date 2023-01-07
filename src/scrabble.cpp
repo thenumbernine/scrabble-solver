@@ -242,23 +242,11 @@ char *rtrim(char *line) {
 	return line;
 }
 
-// case-independent (ci) std::string less_than
-// returns true if s1 < s2
-struct ci_less : std::binary_function<std::string, std::string, bool> {
-
-	// case-independent (ci) compare_less binary function
-	struct nocase_compare : public std::binary_function<unsigned char,unsigned char,bool> {
-		bool operator() (const unsigned char& c1, const unsigned char& c2) const {
-			return tolower (c1) < tolower (c2); }
-	};
-
-	bool operator() (const std::string & s1, const std::string & s2) const {
-		return lexicographical_compare 
-			(s1.begin (), s1.end (),   // source range
-			s2.begin (), s2.end (),   // dest range
-			nocase_compare ());  // comparison
+struct ci_less {
+	bool operator() (std::string const & s1, std::string const & s2) const {
+		return strcasecmp(s1.c_str(), s2.c_str()) < 0;
 	}
-}; // end of ci_less
+};
 
 //sort them by their length
 class Dictionary {
@@ -320,15 +308,13 @@ public:
 	}
 };
 
-using ci_bs = std::binary_function<BoardAndScore*, BoardAndScore*, bool> ;
-
-struct ci_score : ci_bs {
+struct ci_score {
 	bool operator() (const BoardAndScore *s1, const BoardAndScore *s2) const {
 		return s1->score < s2->score;
 	}
 };
 
-struct ci_density : ci_bs {
+struct ci_density {
 	bool operator() (const BoardAndScore *s1, const BoardAndScore *s2) const {
 		return s1->density < s2->density;
 	}
